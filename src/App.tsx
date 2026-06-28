@@ -59,6 +59,36 @@ export default function App() {
     let renderer: THREE.WebGLRenderer | null = null;
     let fallbackMode = false;
 
+    // Create 3x3x3 cubes
+    const cubes: THREE.Mesh[] = [];
+    const geometry = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+
+    for (let x = -1; x <= 1; x++) {
+      for (let y = -1; y <= 1; y++) {
+        for (let z = -1; z <= 1; z++) {
+          if (x === 0 && y === 0 && z === 0) continue;
+
+          const materials = FACE_COLORS.map(color => new THREE.MeshPhongMaterial({ color, shininess: 30 }));
+          const cube = new THREE.Mesh(geometry, materials);
+          cube.position.set(x, y, z);
+          scene.add(cube);
+          cubes.push(cube);
+        }
+      }
+    }
+    cubesRef.current = cubes;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    dirLight.position.set(5, 10, 10);
+    scene.add(dirLight);
+
+    const pivot = new THREE.Group();
+    scene.add(pivot);
+    pivotRef.current = pivot;
+
     // Detection
     const canvasTest = document.createElement('canvas');
     const gl = canvasTest.getContext('webgl') || canvasTest.getContext('experimental-webgl');
@@ -69,7 +99,7 @@ export default function App() {
     } else {
       try {
         renderer = new THREE.WebGLRenderer({ 
-          antialias: false,
+          antialias: true, // Re-enable for AI Studio
           precision: 'mediump',
           alpha: false,
           stencil: false,
@@ -85,8 +115,8 @@ export default function App() {
     }
 
     if (!fallbackMode && renderer) {
-      renderer.setClearColor(0x000000);
-      renderer.setPixelRatio(1);
+      renderer.setClearColor(0x222222); // Gray background to verify renderer visibility
+      renderer.setPixelRatio(window.devicePixelRatio || 1);
       renderer.setSize(width, height);
       renderer.domElement.style.display = 'block';
       if (mountRef.current) {
@@ -95,6 +125,7 @@ export default function App() {
       }
     } else if (mountRef.current) {
       // 2D Fallback
+      setWebglStatus("2D Mode");
       const fallbackCanvas = document.createElement('canvas');
       fallbackCanvas.width = width;
       fallbackCanvas.height = height;
@@ -102,82 +133,121 @@ export default function App() {
       mountRef.current.appendChild(fallbackCanvas);
       const ctx = fallbackCanvas.getContext('2d');
       
-      const drawFallback = () => {
-        if (!ctx) return;
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, width, height);
-        
+      const rotatePoint = (v: THREE.Vector3) => {
         const rx = currentRotation.current.x;
         const ry = currentRotation.current.y;
         
-        const vertices = [];
-        // Generate a 3x3x3 grid of lines
-        for(let i=-1; i<=1; i++) {
-          for(let j=-1; j<=1; j++) {
-            // Lines along X
-            vertices.push([{x:-1.5, y:i, z:j}, {x:1.5, y:i, z:j}]);
-            // Lines along Y
-            vertices.push([{x:i, y:-1.5, z:j}, {x:i, y:1.5, z:j}]);
-            // Lines along Z
-            vertices.push([{x:i, y:j, z:-1.5}, {x:i, y:j, z:1.5}]);
-          }
-        }
+        // Horizontal rotation (around Y)
+        let x = v.x * Math.cos(rx) - v.z * Math.sin(rx);
+        let z = v.x * Math.sin(rx) + v.z * Math.cos(rx);
+        let y = v.y;
+        
+        // Vertical rotation (around X)
+        let ty = y * Math.cos(ry) - z * Math.sin(ry);
+        let tz = y * Math.sin(ry) + z * Math.cos(ry);
+        
+        return new THREE.Vector3(x, ty, tz);
+      };
 
-        const project = (v: any) => {
-          let x = v.x; let y = v.y; let z = v.z;
-          let tx = x * Math.cos(rx) - z * Math.sin(rx);
-          let tz = x * Math.sin(rx) + z * Math.cos(rx);
-          x = tx; z = tz;
-          let ty = y * Math.cos(ry) - z * Math.sin(ry);
-          tz = y * Math.sin(ry) + z * Math.cos(ry);
-          y = ty; z = tz;
-          const factor = 120 / (z + 8);
-          return { x: x * factor + width / 2, y: y * factor + height / 2 };
+      const project = (v: THREE.Vector3) => {
+        // Camera at Z = 10, looking at origin
+        const cameraZ = 10;
+        const distance = cameraZ - v.z;
+        const factor = 200 / distance;
+        return { 
+          x: v.x * factor + width / 2, 
+          y: -v.y * factor + height / 2, // Flip Y for screen coordinates
+          z: v.z
         };
+      };
 
-        ctx.strokeStyle = '#4ade80';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        vertices.forEach(([v1, v2]) => {
-          const p1 = project(v1);
-          const p2 = project(v2);
-          ctx.moveTo(p1.x, p1.y);
-          ctx.lineTo(p2.x, p2.y);
+      const drawFallback = () => {
+        if (!ctx || !cubesRef.current.length) return;
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, 0, width, height);
+
+        const facesToDraw: any[] = [];
+        const s = 0.45; // half-size of sticker
+
+        cubesRef.current.forEach(mesh => {
+          const faces = [
+            { n: new THREE.Vector3(1, 0, 0), colorIdx: 0 },
+            { n: new THREE.Vector3(-1, 0, 0), colorIdx: 1 },
+            { n: new THREE.Vector3(0, 1, 0), colorIdx: 2 },
+            { n: new THREE.Vector3(0, -1, 0), colorIdx: 3 },
+            { n: new THREE.Vector3(0, 0, 1), colorIdx: 4 },
+            { n: new THREE.Vector3(0, 0, -1), colorIdx: 5 }
+          ];
+
+          faces.forEach(face => {
+            const worldNormal = face.n.clone().applyQuaternion(mesh.quaternion);
+            const worldPos = mesh.position.clone().add(worldNormal.clone().multiplyScalar(0.5));
+            
+            const viewNormal = rotatePoint(worldNormal);
+            const viewPos = rotatePoint(worldPos);
+
+            // Backface culling: viewNormal.z > 0 means it points towards camera at Z=10
+            if (viewNormal.z > 0) {
+              let v1, v2, v3, v4;
+              if (face.n.x !== 0) {
+                v1 = new THREE.Vector3(0, -s, -s); v2 = new THREE.Vector3(0, s, -s);
+                v3 = new THREE.Vector3(0, s, s); v4 = new THREE.Vector3(0, -s, s);
+              } else if (face.n.y !== 0) {
+                v1 = new THREE.Vector3(-s, 0, -s); v2 = new THREE.Vector3(s, 0, -s);
+                v3 = new THREE.Vector3(s, 0, s); v4 = new THREE.Vector3(-s, 0, s);
+              } else {
+                v1 = new THREE.Vector3(-s, -s, 0); v2 = new THREE.Vector3(s, -s, 0);
+                v3 = new THREE.Vector3(s, s, 0); v4 = new THREE.Vector3(-s, s, 0);
+              }
+
+              const points = [v1, v2, v3, v4].map(p => {
+                const worldV = p.clone().applyQuaternion(mesh.quaternion).add(mesh.position);
+                return project(rotatePoint(worldV));
+              });
+
+              const materials = mesh.material as any[];
+              const color = materials[face.colorIdx].color.getHex();
+
+              facesToDraw.push({
+                z: viewPos.z,
+                color: `#${color.toString(16).padStart(6, '0')}`,
+                points
+              });
+            }
+          });
         });
-        ctx.stroke();
+
+        // Painter's algorithm: sort by Z (back to front)
+        // Larger Z is closer to camera in this projection
+        facesToDraw.sort((a, b) => a.z - b.z);
+
+        facesToDraw.forEach(f => {
+          ctx.beginPath();
+          ctx.moveTo(f.points[0].x, f.points[0].y);
+          ctx.lineTo(f.points[1].x, f.points[1].y);
+          ctx.lineTo(f.points[2].x, f.points[2].y);
+          ctx.lineTo(f.points[3].x, f.points[3].y);
+          ctx.closePath();
+          ctx.fillStyle = f.color;
+          ctx.fill();
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        });
       };
 
       const fallbackLoop = () => {
         if (mountRef.current) {
+          currentRotation.current.x += (rotationTarget.current.x - currentRotation.current.x) * 0.1;
+          currentRotation.current.y += (rotationTarget.current.y - currentRotation.current.y) * 0.1;
+          frames++;
+          if (frames % 60 === 0) setFrameCount(f => f + 1);
           drawFallback();
           requestAnimationFrame(fallbackLoop);
         }
       };
       fallbackLoop();
     }
-
-    // Create 3x3x3 cubes
-    const cubes: THREE.Mesh[] = [];
-    const geometry = new THREE.BoxGeometry(0.95, 0.95, 0.95);
-
-    for (let x = -1; x <= 1; x++) {
-      for (let y = -1; y <= 1; y++) {
-        for (let z = -1; z <= 1; z++) {
-          if (x === 0 && y === 0 && z === 0) continue;
-
-          const materials = FACE_COLORS.map(color => new THREE.MeshBasicMaterial({ color }));
-          const cube = new THREE.Mesh(geometry, materials);
-          cube.position.set(x, y, z);
-          scene.add(cube);
-          cubes.push(cube);
-        }
-      }
-    }
-    cubesRef.current = cubes;
-
-    const pivot = new THREE.Group();
-    scene.add(pivot);
-    pivotRef.current = pivot;
 
     // Animation loop
     let animationId: number;
