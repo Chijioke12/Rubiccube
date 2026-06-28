@@ -45,9 +45,9 @@ if (fs.existsSync(manifestPath)) {
 // 5. Create the final OmniSD Package Zip
 try {
   console.log('Creating final OmniSD package...');
-  // Zip temp content into omnisd_build/omnisd_package.zip
-  execSync(`npx bestzip ../omnisd_build/omnisd_package.zip *`, { cwd: tempDir });
-  console.log('OmniSD build completed: /omnisd_build/omnisd_package.zip');
+  // Zip temp content into omnisd_build/KaiCube-3D.zip
+  execSync(`npx bestzip ../omnisd_build/KaiCube-3D.zip *`, { cwd: tempDir });
+  console.log('OmniSD build completed: /omnisd_build/KaiCube-3D.zip');
 } catch (error) {
   console.error('Error creating OmniSD package:', error);
   process.exit(1);

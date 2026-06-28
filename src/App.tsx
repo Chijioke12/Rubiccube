@@ -46,26 +46,31 @@ export default function App() {
     sceneRef.current = scene;
 
     const width = 240;
-    const height = 320;
+    const height = Math.min(320, window.innerHeight);
 
-    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-    camera.position.z = 6;
+    const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
+    camera.position.set(0, 0, 8);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ 
+        antialias: false,
+        precision: 'mediump',
+        stencil: false,
+        depth: true
+      });
+    } catch (e) {
+      console.error("WebGL failed", e);
+      return;
+    }
+    renderer.setClearColor(0x111111);
     renderer.setSize(width, height);
     renderer.domElement.style.display = 'block';
     if (mountRef.current) {
       mountRef.current.style.backgroundColor = '#000';
       mountRef.current.appendChild(renderer.domElement);
     }
-
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-    directionalLight.position.set(5, 5, 5);
-    scene.add(directionalLight);
 
     // Create 3x3x3 cubes
     const cubes: THREE.Mesh[] = [];
@@ -76,7 +81,7 @@ export default function App() {
         for (let z = -1; z <= 1; z++) {
           if (x === 0 && y === 0 && z === 0) continue;
 
-          const materials = FACE_COLORS.map(color => new THREE.MeshPhongMaterial({ color }));
+          const materials = FACE_COLORS.map(color => new THREE.MeshBasicMaterial({ color }));
           const cube = new THREE.Mesh(geometry, materials);
           cube.position.set(x, y, z);
           scene.add(cube);
@@ -100,10 +105,11 @@ export default function App() {
       currentRotation.current.y += (rotationTarget.current.y - currentRotation.current.y) * 0.1;
 
       if (cameraRef.current) {
-        const radius = 6;
-        cameraRef.current.position.x = radius * Math.sin(currentRotation.current.x) * Math.cos(currentRotation.current.y);
-        cameraRef.current.position.y = radius * Math.sin(currentRotation.current.y);
-        cameraRef.current.position.z = radius * Math.cos(currentRotation.current.x) * Math.cos(currentRotation.current.y);
+        const radius = 8;
+        const x = radius * Math.sin(currentRotation.current.x) * Math.cos(currentRotation.current.y);
+        const y = radius * Math.sin(currentRotation.current.y);
+        const z = radius * Math.cos(currentRotation.current.x) * Math.cos(currentRotation.current.y);
+        cameraRef.current.position.set(x, y, z);
         cameraRef.current.lookAt(0, 0, 0);
       }
 
@@ -241,9 +247,10 @@ export default function App() {
       height: '320px', 
       position: 'relative',
       backgroundColor: '#000',
-      borderBottom: isDev ? '2px solid #222' : 'none'
+      borderBottom: isDev ? '2px solid #222' : 'none',
+      overflow: 'hidden'
     }}>
-      <div ref={mountRef} style={{ width: '240px', height: '320px', display: 'block' }} />
+      <div ref={mountRef} style={{ width: '240px', height: '320px', display: 'block', backgroundColor: '#000' }} />
       
       {/* Info Overlay (Minimal) */}
       <div style={{
