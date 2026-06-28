@@ -1,0 +1,23 @@
+{
+  "name": "KaiCube 3D",
+  "description": "3D Rubik's Cube game for KaiOS",
+  "launch_path": "/index.html",
+  "icons": {
+    "56": "icon.jpg",
+    "112": "icon.jpg"
+  },
+  "developer": {
+    "name": "KaiCube Dev",
+    "url": "http://example.com"
+  },
+  "type": "web",
+  "permissions": {},
+  "locales": {
+    "en-US": {
+      "name": "KaiCube 3D",
+      "description": "3D Rubik's Cube game for KaiOS"
+    }
+  },
+  "default_locale": "en-US",
+  "fullscreen": "true"
+}

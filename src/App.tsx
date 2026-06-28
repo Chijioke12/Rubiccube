@@ -239,7 +239,7 @@ export default function App() {
       backgroundColor: '#000',
       borderBottom: isDev ? '2px solid #222' : 'none'
     }}>
-      <div ref={mountRef} style={{ width: '240px', height: '320px' }} />
+      <div ref={mountRef} style={{ width: '240px', height: '320px', display: 'block' }} />
       
       {/* Info Overlay (Minimal) */}
       <div style={{
@@ -264,7 +264,15 @@ export default function App() {
 
   if (!isDev) {
     return (
-      <div style={{ width: '240px', height: '320px', overflow: 'hidden', backgroundColor: '#000' }}>
+      <div style={{ 
+        width: '100vw', 
+        height: '100vh', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        backgroundColor: '#000',
+        overflow: 'hidden'
+      }}>
         {content}
       </div>
     );
