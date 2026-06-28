@@ -42,7 +42,7 @@ export default function App() {
 
     // Scene setup
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111111);
+    scene.background = new THREE.Color(0x000000);
     sceneRef.current = scene;
 
     const width = 240;
@@ -54,7 +54,11 @@ export default function App() {
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
-    mountRef.current.appendChild(renderer.domElement);
+    renderer.domElement.style.display = 'block';
+    if (mountRef.current) {
+      mountRef.current.style.backgroundColor = '#000';
+      mountRef.current.appendChild(renderer.domElement);
+    }
 
     // Lights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
@@ -264,14 +268,17 @@ export default function App() {
 
   if (!isDev) {
     return (
-      <div style={{ 
+      <div id="app-container" style={{ 
         width: '100vw', 
         height: '100vh', 
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'center', 
         backgroundColor: '#000',
-        overflow: 'hidden'
+        color: '#fff',
+        overflow: 'hidden',
+        margin: 0,
+        padding: 0
       }}>
         {content}
       </div>
@@ -279,12 +286,12 @@ export default function App() {
   }
 
   return (
-    <div style={{ 
+    <div id="dev-container" style={{ 
       width: '100vw', 
       minHeight: '100vh', 
       overflowY: 'auto', 
       position: 'relative', 
-      backgroundColor: '#222',
+      backgroundColor: '#000',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
