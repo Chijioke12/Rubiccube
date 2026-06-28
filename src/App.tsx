@@ -56,32 +56,104 @@ export default function App() {
     camera.position.set(0, 0, 8);
     cameraRef.current = camera;
 
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({ 
-        antialias: false,
-        precision: 'mediump',
-        alpha: false,
-        stencil: false,
-        depth: true,
-        preserveDrawingBuffer: true
-      });
-      if (!renderer.getContext()) {
-        throw new Error("Could not create WebGL context");
+    let renderer: THREE.WebGLRenderer | null = null;
+    let fallbackMode = false;
+
+    // Detection
+    const canvasTest = document.createElement('canvas');
+    const gl = canvasTest.getContext('webgl') || canvasTest.getContext('experimental-webgl');
+    
+    if (!gl) {
+      fallbackMode = true;
+      setWebglStatus("No GL Support");
+    } else {
+      try {
+        renderer = new THREE.WebGLRenderer({ 
+          antialias: false,
+          precision: 'mediump',
+          alpha: false,
+          stencil: false,
+          depth: true,
+          preserveDrawingBuffer: true
+        });
+        if (!renderer.getContext()) throw new Error("Context failed");
+        setWebglStatus("WebGL OK");
+      } catch (e) {
+        fallbackMode = true;
+        setWebglStatus("GL Init Error");
       }
-      setWebglStatus("WebGL OK");
-    } catch (e) {
-      console.error("WebGL failed", e);
-      setWebglStatus("WebGL Failed: " + (e instanceof Error ? e.message : "Unknown"));
-      return;
     }
-    renderer.setClearColor(0x000000);
-    renderer.setPixelRatio(1);
-    renderer.setSize(width, height);
-    renderer.domElement.style.display = 'block';
-    if (mountRef.current) {
-      mountRef.current.style.backgroundColor = '#000';
-      mountRef.current.appendChild(renderer.domElement);
+
+    if (!fallbackMode && renderer) {
+      renderer.setClearColor(0x000000);
+      renderer.setPixelRatio(1);
+      renderer.setSize(width, height);
+      renderer.domElement.style.display = 'block';
+      if (mountRef.current) {
+        mountRef.current.style.backgroundColor = '#000';
+        mountRef.current.appendChild(renderer.domElement);
+      }
+    } else if (mountRef.current) {
+      // 2D Fallback
+      const fallbackCanvas = document.createElement('canvas');
+      fallbackCanvas.width = width;
+      fallbackCanvas.height = height;
+      fallbackCanvas.style.display = 'block';
+      mountRef.current.appendChild(fallbackCanvas);
+      const ctx = fallbackCanvas.getContext('2d');
+      
+      const drawFallback = () => {
+        if (!ctx) return;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        
+        const rx = currentRotation.current.x;
+        const ry = currentRotation.current.y;
+        
+        const vertices = [];
+        // Generate a 3x3x3 grid of lines
+        for(let i=-1; i<=1; i++) {
+          for(let j=-1; j<=1; j++) {
+            // Lines along X
+            vertices.push([{x:-1.5, y:i, z:j}, {x:1.5, y:i, z:j}]);
+            // Lines along Y
+            vertices.push([{x:i, y:-1.5, z:j}, {x:i, y:1.5, z:j}]);
+            // Lines along Z
+            vertices.push([{x:i, y:j, z:-1.5}, {x:i, y:j, z:1.5}]);
+          }
+        }
+
+        const project = (v: any) => {
+          let x = v.x; let y = v.y; let z = v.z;
+          let tx = x * Math.cos(rx) - z * Math.sin(rx);
+          let tz = x * Math.sin(rx) + z * Math.cos(rx);
+          x = tx; z = tz;
+          let ty = y * Math.cos(ry) - z * Math.sin(ry);
+          tz = y * Math.sin(ry) + z * Math.cos(ry);
+          y = ty; z = tz;
+          const factor = 120 / (z + 8);
+          return { x: x * factor + width / 2, y: y * factor + height / 2 };
+        };
+
+        ctx.strokeStyle = '#4ade80';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        vertices.forEach(([v1, v2]) => {
+          const p1 = project(v1);
+          const p2 = project(v2);
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+        });
+        ctx.stroke();
+      };
+
+      const fallbackLoop = () => {
+        if (mountRef.current) {
+          drawFallback();
+          requestAnimationFrame(fallbackLoop);
+        }
+      };
+      fallbackLoop();
     }
 
     // Create 3x3x3 cubes
@@ -128,13 +200,17 @@ export default function App() {
         cameraRef.current.lookAt(0, 0, 0);
       }
 
-      renderer.render(scene, camera);
+      if (renderer) {
+        renderer.render(scene, camera);
+      }
     };
-    animate();
+    if (!fallbackMode) animate();
 
     return () => {
       cancelAnimationFrame(animationId);
-      if (mountRef.current) mountRef.current.removeChild(renderer.domElement);
+      if (mountRef.current && renderer && renderer.domElement.parentNode) {
+        mountRef.current.removeChild(renderer.domElement);
+      }
     };
   }, []);
 
