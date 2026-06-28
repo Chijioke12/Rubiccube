@@ -1,0 +1,6 @@
+{
+  "name": "KaiCube 3D",
+  "description": "A 3D Rubik's Cube game optimized for KaiOS devices using D-pad and numeric keypad controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
