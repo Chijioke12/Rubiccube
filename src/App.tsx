@@ -5,427 +5,152 @@
 
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import * as THREE from 'three';
-
-const COLORS = {
-  white: 0xffffff,
-  yellow: 0xffff00,
-  red: 0xff0000,
-  orange: 0xffa500,
-  blue: 0x0000ff,
-  green: 0x00ff00,
-  black: 0x000000,
-};
-
-// Face order for Three.js BoxGeometry: [Right, Left, Top, Bottom, Front, Back]
-// We use these indices for face identification in both 3D and 2D modes.
+import { RubiksEngine } from './rubiksEngine';
 
 export default function App() {
   const [isCW, setIsCW] = useState(true);
   const [webglStatus, setWebglStatus] = useState("Initializing...");
   const [frameCount, setFrameCount] = useState(0);
+  const [isRotating, setIsRotating] = useState(false);
 
   const mountRef = useRef<HTMLDivElement>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cubesRef = useRef<THREE.Mesh[]>([]);
-  const pivotRef = useRef<THREE.Group | null>(null);
-  const [isRotating, setIsRotating] = useState(false);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const rotationTarget = useRef({ x: 0, y: 0 });
+  const engineRef = useRef<RubiksEngine | null>(null);
+  const rotationTarget = useRef({ x: 0.5, y: 0.5 });
   const currentRotation = useRef({ x: 0.5, y: 0.5 });
 
   useEffect(() => {
     if (!mountRef.current) return;
 
-    // Scene setup
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
-    sceneRef.current = scene;
+    const engine = new RubiksEngine();
+    engineRef.current = engine;
 
-    const width = 240;
-    const height = Math.min(320, window.innerHeight);
+    const hasWebGL = engine.initRenderer(mountRef.current);
+    setWebglStatus(hasWebGL ? "WebGL OK" : "2D Mode");
 
-    const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-    camera.position.set(0, 0, 8);
-    cameraRef.current = camera;
-
-    let renderer: THREE.WebGLRenderer | null = null;
-    let fallbackMode = false;
-
-    // Create 3x3x3 cubes
-    const cubes: THREE.Mesh[] = [];
-    const geometry = new THREE.BoxGeometry(0.95, 0.95, 0.95);
-
-    for (let x = -1; x <= 1; x++) {
-      for (let y = -1; y <= 1; y++) {
-        for (let z = -1; z <= 1; z++) {
-          if (x === 0 && y === 0 && z === 0) continue;
-
-          // Standard Rubik's: Only outer faces have colors, others are black
-          // Face order: [Right, Left, Top, Bottom, Front, Back]
-          const materials = [
-            new THREE.MeshPhongMaterial({ color: x === 1 ? COLORS.red : COLORS.black, shininess: 30 }),
-            new THREE.MeshPhongMaterial({ color: x === -1 ? COLORS.orange : COLORS.black, shininess: 30 }),
-            new THREE.MeshPhongMaterial({ color: y === 1 ? COLORS.white : COLORS.black, shininess: 30 }),
-            new THREE.MeshPhongMaterial({ color: y === -1 ? COLORS.yellow : COLORS.black, shininess: 30 }),
-            new THREE.MeshPhongMaterial({ color: z === 1 ? COLORS.green : COLORS.black, shininess: 30 }),
-            new THREE.MeshPhongMaterial({ color: z === -1 ? COLORS.blue : COLORS.black, shininess: 30 }),
-          ];
-          
-          const cube = new THREE.Mesh(geometry, materials);
-          cube.position.set(x, y, z);
-          // Store which faces have stickers for 2D mode
-          (cube as any).userData = {
-            stickers: [x === 1, x === -1, y === 1, y === -1, z === 1, z === -1]
-          };
-          scene.add(cube);
-          cubes.push(cube);
-        }
-      }
-    }
-    cubesRef.current = cubes;
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
-    dirLight.position.set(5, 10, 10);
-    scene.add(dirLight);
-
-    const pivot = new THREE.Group();
-    scene.add(pivot);
-    pivotRef.current = pivot;
-
-    // Detection
-    const canvasTest = document.createElement('canvas');
-    const gl = canvasTest.getContext('webgl') || canvasTest.getContext('experimental-webgl');
-    
-    if (!gl) {
-      fallbackMode = true;
-      setWebglStatus("No GL Support");
-    } else {
-      try {
-        renderer = new THREE.WebGLRenderer({ 
-          antialias: true, // Re-enable for AI Studio
-          precision: 'mediump',
-          alpha: false,
-          stencil: false,
-          depth: true,
-          preserveDrawingBuffer: true
-        });
-        if (!renderer.getContext()) throw new Error("Context failed");
-        setWebglStatus("WebGL OK");
-      } catch (e) {
-        fallbackMode = true;
-        setWebglStatus("GL Init Error");
-      }
-    }
-
-    if (!fallbackMode && renderer) {
-      renderer.setClearColor(0x222222); // Gray background to verify renderer visibility
-      renderer.setPixelRatio(window.devicePixelRatio || 1);
-      renderer.setSize(width, height);
-      renderer.domElement.style.display = 'block';
-      if (mountRef.current) {
-        mountRef.current.style.backgroundColor = '#000';
-        mountRef.current.appendChild(renderer.domElement);
-      }
-    } else if (mountRef.current) {
-      // 2D Fallback
-      setWebglStatus("2D Mode");
+    let fallbackCtx: CanvasRenderingContext2D | null = null;
+    if (!hasWebGL) {
       const fallbackCanvas = document.createElement('canvas');
-      fallbackCanvas.width = width;
-      fallbackCanvas.height = height;
+      fallbackCanvas.width = engine.width;
+      fallbackCanvas.height = engine.height;
       fallbackCanvas.style.display = 'block';
       mountRef.current.appendChild(fallbackCanvas);
-      const ctx = fallbackCanvas.getContext('2d');
-      
-      const rotatePoint = (v: THREE.Vector3) => {
-        const rx = currentRotation.current.x;
-        const ry = currentRotation.current.y;
-        
-        // Horizontal rotation (around Y)
-        let x = v.x * Math.cos(rx) - v.z * Math.sin(rx);
-        let z = v.x * Math.sin(rx) + v.z * Math.cos(rx);
-        let y = v.y;
-        
-        // Vertical rotation (around X)
-        let ty = y * Math.cos(ry) - z * Math.sin(ry);
-        let tz = y * Math.sin(ry) + z * Math.cos(ry);
-        
-        return new THREE.Vector3(x, ty, tz);
-      };
-
-      const project = (v: THREE.Vector3) => {
-        // Camera at Z = 10, looking at origin
-        const cameraZ = 10;
-        const distance = cameraZ - v.z;
-        const factor = 200 / distance;
-        return { 
-          x: v.x * factor + width / 2, 
-          y: -v.y * factor + height / 2, // Flip Y for screen coordinates
-          z: v.z
-        };
-      };
-
-      const lightDirection = new THREE.Vector3(1, 2, 3).normalize();
-
-      const drawFallback = () => {
-        if (!ctx || !cubesRef.current.length) return;
-        ctx.fillStyle = '#111';
-        ctx.fillRect(0, 0, width, height);
-
-        const facesToDraw: any[] = [];
-        const stickerS = 0.44; // half-size of sticker
-        const bodyS = 0.48;    // half-size of cubie face
-
-        cubesRef.current.forEach(mesh => {
-          mesh.updateMatrixWorld();
-          const worldQuat = new THREE.Quaternion();
-          const worldPosVec = new THREE.Vector3();
-          mesh.getWorldQuaternion(worldQuat);
-          mesh.getWorldPosition(worldPosVec);
-
-          const baseFaces = [
-            { n: new THREE.Vector3(1, 0, 0), colorIdx: 0 },
-            { n: new THREE.Vector3(-1, 0, 0), colorIdx: 1 },
-            { n: new THREE.Vector3(0, 1, 0), colorIdx: 2 },
-            { n: new THREE.Vector3(0, -1, 0), colorIdx: 3 },
-            { n: new THREE.Vector3(0, 0, 1), colorIdx: 4 },
-            { n: new THREE.Vector3(0, 0, -1), colorIdx: 5 }
-          ];
-
-          baseFaces.forEach(face => {
-            const worldNormal = face.n.clone().applyQuaternion(worldQuat);
-            const facePos = worldPosVec.clone().add(worldNormal.clone().multiplyScalar(0.48));
-            
-            const viewNormal = rotatePoint(worldNormal);
-            const viewPos = rotatePoint(facePos);
-
-            // Backface culling: viewNormal.z > 0 means it points towards camera at Z=10
-            if (viewNormal.z > 0) {
-              const hasSticker = (mesh.userData as any).stickers[face.colorIdx];
-              
-              // Shading calculation
-              const dot = Math.max(0, viewNormal.dot(lightDirection));
-              const brightness = 0.4 + dot * 0.6; // Ambient + Diffuse
-
-              // Helper to define face vertices
-              const getVertices = (s: number) => {
-                let v1, v2, v3, v4;
-                if (face.n.x !== 0) {
-                  v1 = new THREE.Vector3(0, -s, -s); v2 = new THREE.Vector3(0, s, -s);
-                  v3 = new THREE.Vector3(0, s, s); v4 = new THREE.Vector3(0, -s, s);
-                } else if (face.n.y !== 0) {
-                  v1 = new THREE.Vector3(-s, 0, -s); v2 = new THREE.Vector3(s, 0, -s);
-                  v3 = new THREE.Vector3(s, 0, s); v4 = new THREE.Vector3(-s, 0, s);
-                } else {
-                  v1 = new THREE.Vector3(-s, -s, 0); v2 = new THREE.Vector3(s, -s, 0);
-                  v3 = new THREE.Vector3(s, s, 0); v4 = new THREE.Vector3(-s, s, 0);
-                }
-                return [v1, v2, v3, v4].map(p => {
-                  const worldV = p.clone().applyQuaternion(worldQuat).add(worldPosVec);
-                  return project(rotatePoint(worldV));
-                });
-              };
-
-              // Add Cubie Body (Black)
-              facesToDraw.push({
-                z: viewPos.z - 0.001, // Slightly behind sticker to prevent Z-fighting in sorting
-                color: '#000000',
-                points: getVertices(bodyS)
-              });
-
-              // Add Sticker if it's an outer face
-              if (hasSticker) {
-                const materials = mesh.material as any[];
-                const baseColor = materials[face.colorIdx].color;
-                const r = Math.floor(baseColor.r * 255 * brightness);
-                const g = Math.floor(baseColor.g * 255 * brightness);
-                const b = Math.floor(baseColor.b * 255 * brightness);
-                
-                facesToDraw.push({
-                  z: viewPos.z,
-                  color: `rgb(${r},${g},${b})`,
-                  points: getVertices(stickerS)
-                });
-              }
-            }
-          });
-        });
-
-        // Painter's algorithm: sort by Z (back to front)
-        facesToDraw.sort((a, b) => a.z - b.z);
-
-        facesToDraw.forEach(f => {
-          ctx.beginPath();
-          ctx.moveTo(f.points[0].x, f.points[0].y);
-          for (let i = 1; i < 4; i++) {
-            ctx.lineTo(f.points[i].x, f.points[i].y);
-          }
-          ctx.closePath();
-          ctx.fillStyle = f.color;
-          ctx.fill();
-        });
-      };
-
-      const fallbackLoop = () => {
-        if (mountRef.current) {
-          currentRotation.current.x += (rotationTarget.current.x - currentRotation.current.x) * 0.1;
-          currentRotation.current.y += (rotationTarget.current.y - currentRotation.current.y) * 0.1;
-          frames++;
-          if (frames % 60 === 0) setFrameCount(f => f + 1);
-          drawFallback();
-          requestAnimationFrame(fallbackLoop);
-        }
-      };
-      fallbackLoop();
+      fallbackCtx = fallbackCanvas.getContext('2d');
     }
 
-    // Animation loop
     let animationId: number;
-    let frames = 0;
     const animate = () => {
       animationId = requestAnimationFrame(animate);
-      frames++;
-      if (frames % 60 === 0) setFrameCount(f => f + 1);
+      setFrameCount(prev => prev + 1);
 
-      // Smooth camera rotation
+      // Smooth rotation
       currentRotation.current.x += (rotationTarget.current.x - currentRotation.current.x) * 0.1;
       currentRotation.current.y += (rotationTarget.current.y - currentRotation.current.y) * 0.1;
 
-      if (cameraRef.current) {
-        const radius = 8;
-        const x = radius * Math.sin(currentRotation.current.x) * Math.cos(currentRotation.current.y);
-        const y = radius * Math.sin(currentRotation.current.y);
-        const z = radius * Math.cos(currentRotation.current.x) * Math.cos(currentRotation.current.y);
-        cameraRef.current.position.set(x, y, z);
-        cameraRef.current.lookAt(0, 0, 0);
-      }
-
-      if (renderer) {
-        renderer.render(scene, camera);
+      if (hasWebGL) {
+        engine.updateCamera(currentRotation.current);
+        engine.render();
+      } else if (fallbackCtx) {
+        engine.draw2D(fallbackCtx, currentRotation.current);
       }
     };
-    if (!fallbackMode) animate();
+    animate();
 
     return () => {
       cancelAnimationFrame(animationId);
-      if (mountRef.current && renderer && renderer.domElement.parentNode) {
-        mountRef.current.removeChild(renderer.domElement);
-      }
+      engine.dispose();
     };
   }, []);
 
-  const rotateFace = (axis: 'x' | 'y' | 'z', layer: number, angle: number) => {
-    if (isRotating || !pivotRef.current || !sceneRef.current) return;
-    setIsRotating(true);
-
-    const pivot = pivotRef.current;
-    pivot.rotation.set(0, 0, 0);
-    pivot.updateMatrixWorld();
-
-    const cubesToRotate = cubesRef.current.filter(cube => {
-      const pos = new THREE.Vector3();
-      cube.getWorldPosition(pos);
-      const val = axis === 'x' ? pos.x : axis === 'y' ? pos.y : pos.z;
-      return Math.abs(val - layer) < 0.1;
-    });
-
-    cubesToRotate.forEach(cube => pivot.add(cube));
-
-    const startTime = performance.now();
-    const duration = 300;
-
-    const animateRotation = (time: number) => {
-      const elapsed = time - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const easeProgress = progress * (2 - progress); // Ease out
-
-      if (axis === 'x') pivot.rotation.x = angle * easeProgress;
-      else if (axis === 'y') pivot.rotation.y = angle * easeProgress;
-      else pivot.rotation.z = angle * easeProgress;
-
-      if (progress < 1) {
-        requestAnimationFrame(animateRotation);
-      } else {
-        pivot.updateMatrixWorld();
-        cubesToRotate.forEach(cube => {
-          cube.applyMatrix4(pivot.matrixWorld);
-          sceneRef.current!.add(cube);
-        });
-        pivot.rotation.set(0, 0, 0);
-        setIsRotating(false);
+  const checkWebGL = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) {
+        alert("WebGL is NOT supported on this device.");
+        return;
       }
-    };
-
-    requestAnimationFrame(animateRotation);
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      const vendor = debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : "Unknown Vendor";
+      const renderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : "Unknown Renderer";
+      const version = gl.getParameter(gl.VERSION);
+      const shadingLanguageVersion = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+      
+      alert(
+        `WebGL Support Details:\n` +
+        `- Supported: Yes\n` +
+        `- Vendor: ${vendor}\n` +
+        `- Renderer: ${renderer}\n` +
+        `- Version: ${version}\n` +
+        `- GLSL Version: ${shadingLanguageVersion}`
+      );
+    } catch (e) {
+      alert("Error checking WebGL: " + (e as Error).message);
+    }
   };
 
   const handleAction = (action: string) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
     switch (action) {
+      case 'softleft':
+        checkWebGL();
+        break;
       case 'left': rotationTarget.current.x -= 0.5; break;
       case 'right': rotationTarget.current.x += 0.5; break;
       case 'up': rotationTarget.current.y = Math.min(rotationTarget.current.y + 0.5, Math.PI / 2 - 0.1); break;
       case 'down': rotationTarget.current.y = Math.max(rotationTarget.current.y - 0.5, -Math.PI / 2 + 0.1); break;
       
-      // Face Rotations (Directional Mapping)
-      case '2': rotateFace('y', 1, isCW ? -Math.PI / 2 : Math.PI / 2); break;  // Up
-      case '8': rotateFace('y', -1, isCW ? Math.PI / 2 : -Math.PI / 2); break; // Down
-      case '4': rotateFace('x', -1, isCW ? Math.PI / 2 : -Math.PI / 2); break; // Left
-      case '6': rotateFace('x', 1, isCW ? -Math.PI / 2 : Math.PI / 2); break;  // Right
-      case '5': rotateFace('z', 1, isCW ? Math.PI / 2 : -Math.PI / 2); break;  // Front
-      case '0': rotateFace('z', -1, isCW ? -Math.PI / 2 : Math.PI / 2); break; // Back
+      case '2': engine.rotateFace('y', 1, isCW ? -Math.PI / 2 : Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
+      case '8': engine.rotateFace('y', -1, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
+      case '4': engine.rotateFace('x', -1, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
+      case '6': engine.rotateFace('x', 1, isCW ? -Math.PI / 2 : Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
+      case '5': engine.rotateFace('z', 1, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
+      case '0': engine.rotateFace('z', -1, isCW ? -Math.PI / 2 : Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
       
-      // Middle Layer Rotations
-      case '1': rotateFace('x', 0, isCW ? Math.PI / 2 : -Math.PI / 2); break;  // Mid X
-      case '3': rotateFace('y', 0, isCW ? -Math.PI / 2 : Math.PI / 2); break; // Mid Y
-      case '7': rotateFace('z', 0, isCW ? Math.PI / 2 : -Math.PI / 2); break;  // Mid Z
+      case '1': engine.rotateFace('x', 0, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
+      case '3': engine.rotateFace('y', 0, isCW ? -Math.PI / 2 : Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
+      case '7': engine.rotateFace('z', 0, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
 
-      case '*': 
-        rotationTarget.current = { x: 0.5, y: 0.5 };
-        break;
-      case '#': setIsCW(!isCW); break; // Toggle direction
+      case '*': rotationTarget.current = { x: 0.5, y: 0.5 }; break;
+      case '#': setIsCW(!isCW); break;
     }
   };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key.startsWith('Arrow')) {
-        handleAction(e.key.toLowerCase().replace('arrow', ''));
-      } else if (e.key === '*') {
+      const key = e.key;
+      if (key === 'SoftLeft' || key === 'F1') {
+        e.preventDefault();
+        handleAction('softleft');
+      } else if (key === 'SoftRight' || key === 'F2') {
+        e.preventDefault();
+        handleAction('softright');
+      } else if (key.startsWith('Arrow')) {
+        handleAction(key.toLowerCase().replace('arrow', ''));
+      } else if (key === '*') {
         handleAction('*');
+      } else if (key === '#') {
+        handleAction('#');
       } else {
-        handleAction(e.key);
+        handleAction(key);
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isRotating]);
+  }, [isRotating, isCW]);
 
   const ControlButton = ({ label, action, style = {} }: { label: string, action: string, style?: any }) => (
     <button
       onClick={() => handleAction(action)}
       style={{
-        width: '36px',
-        height: '36px',
-        margin: '1px',
+        width: '36px', height: '36px', margin: '1px',
         backgroundColor: 'rgba(255,255,255,0.1)',
         border: '1px solid rgba(255,255,255,0.2)',
-        color: 'white',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '12px',
-        userSelect: 'none',
-        ...style
+        color: 'white', borderRadius: '4px', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '12px', userSelect: 'none', ...style
       }}
-      onMouseDown={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.3)')}
-      onMouseUp={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)')}
-      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)')}
     >
       {label}
     </button>
@@ -434,30 +159,12 @@ export default function App() {
   const isDev = import.meta.env.DEV;
 
   const content = (
-    <div style={{ 
-      width: '240px', 
-      height: '320px', 
-      position: 'relative',
-      backgroundColor: '#000',
-      borderBottom: isDev ? '2px solid #222' : 'none',
-      overflow: 'hidden'
-    }}>
+    <div style={{ width: '240px', height: '320px', position: 'relative', backgroundColor: '#000', overflow: 'hidden' }}>
       <div ref={mountRef} style={{ width: '240px', height: '320px', display: 'block', backgroundColor: '#000' }} />
-      
-      {/* Info Overlay (Minimal) */}
       <div style={{
-        position: 'absolute',
-        top: '5px',
-        left: '5px',
-        right: '5px',
-        color: 'white',
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        padding: '4px 8px',
-        borderRadius: '4px',
-        fontSize: '9px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        pointerEvents: 'none'
+        position: 'absolute', top: '5px', left: '5px', right: '5px', color: 'white',
+        backgroundColor: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px',
+        fontSize: '9px', display: 'flex', justifyContent: 'space-between', pointerEvents: 'none'
       }}>
         <span style={{ color: isCW ? '#4ade80' : '#f87171' }}>{isCW ? "CW" : "CCW"} (#)</span>
         <span>{webglStatus} | {frameCount}</span>
@@ -468,104 +175,38 @@ export default function App() {
 
   if (!isDev) {
     return (
-      <div id="app-container" style={{ 
-        width: '100vw', 
-        height: '100vh', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        backgroundColor: '#000',
-        color: '#fff',
-        overflow: 'hidden',
-        margin: 0,
-        padding: 0
-      }}>
+      <div id="app-container" style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#000', color: '#fff', overflow: 'hidden', margin: 0, padding: 0 }}>
         {content}
       </div>
     );
   }
 
   return (
-    <div id="dev-container" style={{ 
-      width: '100vw', 
-      minHeight: '100vh', 
-      overflowY: 'auto', 
-      position: 'relative', 
-      backgroundColor: '#000',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '20px',
-      boxSizing: 'border-box',
-      fontFamily: 'system-ui, sans-serif'
-    }}>
-      {/* KaiOS Device Wrapper - Only in DEV */}
-      <div style={{ 
-        width: '240px', 
-        backgroundColor: '#111',
-        borderRadius: '20px',
-        border: '4px solid #333',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-        flexShrink: 0
-      }}>
-        
-        {/* Screen Area (240x320) */}
+    <div id="dev-container" style={{ width: '100vw', minHeight: '100vh', overflowY: 'auto', position: 'relative', backgroundColor: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', boxSizing: 'border-box', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ width: '240px', backgroundColor: '#111', borderRadius: '20px', border: '4px solid #333', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 50px rgba(0,0,0,0.5)', flexShrink: 0 }}>
         {content}
-
-        {/* Keypad Area */}
-        <div style={{ 
-          flex: 1, 
-          backgroundColor: '#1a1a1a', 
-          padding: '10px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '10px'
-        }}>
-          
-          {/* D-Pad */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: '2px',
-            width: '120px',
-            margin: '0 auto'
-          }}>
-            <div />
-            <ControlButton label="▲" action="up" style={{ borderRadius: '10px 10px 0 0' }} />
-            <div />
-            <ControlButton label="◀" action="left" style={{ borderRadius: '10px 0 0 10px' }} />
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#333', color: '#666', fontSize: '8px' }}>OK</div>
-            <ControlButton label="▶" action="right" style={{ borderRadius: '0 10px 10px 0' }} />
-            <div />
-            <ControlButton label="▼" action="down" style={{ borderRadius: '0 0 10px 10px' }} />
-            <div />
+        <div style={{ flex: 1, backgroundColor: '#1a1a1a', padding: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '2px', width: '120px', margin: '0 auto' }}>
+            <div /> <ControlButton label="▲" action="up" style={{ borderRadius: '10px 10px 0 0' }} /> <div />
+            <ControlButton label="◀" action="left" style={{ borderRadius: '10px 0 0 10px' }} /> <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#333', color: '#666', fontSize: '8px' }}>OK</div> <ControlButton label="▶" action="right" style={{ borderRadius: '0 10px 10px 0' }} />
+            <div /> <ControlButton label="▼" action="down" style={{ borderRadius: '0 0 10px 10px' }} /> <div />
           </div>
-
-          {/* Numeric Keypad */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: '4px'
-          }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, '*', 0, '#'].map(key => (
               <ControlButton 
                 key={key} 
                 label={key === '#' ? (isCW ? "CW" : "CCW") : key.toString()} 
                 action={key.toString()} 
-                style={{ 
-                  height: '32px', 
-                  fontSize: key === '#' ? '9px' : '14px',
-                  backgroundColor: key === '#' ? (isCW ? 'rgba(0,255,0,0.1)' : 'rgba(255,0,0,0.1)') : 'rgba(255,255,255,0.05)'
-                }}
+                style={{ height: '32px', fontSize: key === '#' ? '9px' : '14px', backgroundColor: key === '#' ? (isCW ? 'rgba(0,255,0,0.1)' : 'rgba(255,0,0,0.1)') : 'rgba(255,255,255,0.05)' }}
               />
             ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 10px', backgroundColor: '#333', borderRadius: '5px', fontSize: '10px', color: '#aaa' }}>
+            <span>WebGL Info</span>
+            <span>Reset</span>
           </div>
         </div>
       </div>
     </div>
   );
 }
-

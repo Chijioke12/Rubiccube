@@ -13,14 +13,12 @@
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
-    "@types/three": "^0.185.0",
     "bestzip": "^3.0.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
-    "preact": "^10.29.3",
-    "three": "^0.185.0"
+    "preact": "^10.29.3"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.5",
