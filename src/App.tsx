@@ -170,6 +170,12 @@ export default function App() {
         const s = 0.45; // half-size of sticker
 
         cubesRef.current.forEach(mesh => {
+          mesh.updateMatrixWorld();
+          const worldQuat = new THREE.Quaternion();
+          const worldPosVec = new THREE.Vector3();
+          mesh.getWorldQuaternion(worldQuat);
+          mesh.getWorldPosition(worldPosVec);
+
           const faces = [
             { n: new THREE.Vector3(1, 0, 0), colorIdx: 0 },
             { n: new THREE.Vector3(-1, 0, 0), colorIdx: 1 },
@@ -180,11 +186,11 @@ export default function App() {
           ];
 
           faces.forEach(face => {
-            const worldNormal = face.n.clone().applyQuaternion(mesh.quaternion);
-            const worldPos = mesh.position.clone().add(worldNormal.clone().multiplyScalar(0.5));
+            const worldNormal = face.n.clone().applyQuaternion(worldQuat);
+            const facePos = worldPosVec.clone().add(worldNormal.clone().multiplyScalar(0.5));
             
             const viewNormal = rotatePoint(worldNormal);
-            const viewPos = rotatePoint(worldPos);
+            const viewPos = rotatePoint(facePos);
 
             // Backface culling: viewNormal.z > 0 means it points towards camera at Z=10
             if (viewNormal.z > 0) {
@@ -201,7 +207,7 @@ export default function App() {
               }
 
               const points = [v1, v2, v3, v4].map(p => {
-                const worldV = p.clone().applyQuaternion(mesh.quaternion).add(mesh.position);
+                const worldV = p.clone().applyQuaternion(worldQuat).add(worldPosVec);
                 return project(rotatePoint(worldV));
               });
 
