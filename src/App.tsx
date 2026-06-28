@@ -28,6 +28,10 @@ const FACE_COLORS = [
 ];
 
 export default function App() {
+  const [isCW, setIsCW] = useState(true);
+  const [webglStatus, setWebglStatus] = useState("Initializing...");
+  const [frameCount, setFrameCount] = useState(0);
+
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cubesRef = useRef<THREE.Mesh[]>([]);
@@ -57,14 +61,22 @@ export default function App() {
       renderer = new THREE.WebGLRenderer({ 
         antialias: false,
         precision: 'mediump',
+        alpha: false,
         stencil: false,
-        depth: true
+        depth: true,
+        preserveDrawingBuffer: true
       });
+      if (!renderer.getContext()) {
+        throw new Error("Could not create WebGL context");
+      }
+      setWebglStatus("WebGL OK");
     } catch (e) {
       console.error("WebGL failed", e);
+      setWebglStatus("WebGL Failed: " + (e instanceof Error ? e.message : "Unknown"));
       return;
     }
-    renderer.setClearColor(0x111111);
+    renderer.setClearColor(0x000000);
+    renderer.setPixelRatio(1);
     renderer.setSize(width, height);
     renderer.domElement.style.display = 'block';
     if (mountRef.current) {
@@ -97,8 +109,11 @@ export default function App() {
 
     // Animation loop
     let animationId: number;
+    let frames = 0;
     const animate = () => {
       animationId = requestAnimationFrame(animate);
+      frames++;
+      if (frames % 60 === 0) setFrameCount(f => f + 1);
 
       // Smooth camera rotation
       currentRotation.current.x += (rotationTarget.current.x - currentRotation.current.x) * 0.1;
@@ -167,8 +182,6 @@ export default function App() {
 
     requestAnimationFrame(animateRotation);
   };
-
-  const [isCW, setIsCW] = useState(true);
 
   const handleAction = (action: string) => {
     switch (action) {
@@ -268,6 +281,7 @@ export default function App() {
         pointerEvents: 'none'
       }}>
         <span style={{ color: isCW ? '#4ade80' : '#f87171' }}>{isCW ? "CW" : "CCW"} (#)</span>
+        <span>{webglStatus} | {frameCount}</span>
         <span>* Reset</span>
       </div>
     </div>
