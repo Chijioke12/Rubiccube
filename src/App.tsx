@@ -18,14 +18,7 @@ const COLORS = {
 };
 
 // Face order for Three.js BoxGeometry: [Right, Left, Top, Bottom, Front, Back]
-const FACE_COLORS = [
-  COLORS.red,    // Right
-  COLORS.orange, // Left
-  COLORS.white,  // Top
-  COLORS.yellow, // Bottom
-  COLORS.green,  // Front
-  COLORS.blue,   // Back
-];
+// We use these indices for face identification in both 3D and 2D modes.
 
 export default function App() {
   const [isCW, setIsCW] = useState(true);
@@ -68,9 +61,23 @@ export default function App() {
         for (let z = -1; z <= 1; z++) {
           if (x === 0 && y === 0 && z === 0) continue;
 
-          const materials = FACE_COLORS.map(color => new THREE.MeshPhongMaterial({ color, shininess: 30 }));
+          // Standard Rubik's: Only outer faces have colors, others are black
+          // Face order: [Right, Left, Top, Bottom, Front, Back]
+          const materials = [
+            new THREE.MeshPhongMaterial({ color: x === 1 ? COLORS.red : COLORS.black, shininess: 30 }),
+            new THREE.MeshPhongMaterial({ color: x === -1 ? COLORS.orange : COLORS.black, shininess: 30 }),
+            new THREE.MeshPhongMaterial({ color: y === 1 ? COLORS.white : COLORS.black, shininess: 30 }),
+            new THREE.MeshPhongMaterial({ color: y === -1 ? COLORS.yellow : COLORS.black, shininess: 30 }),
+            new THREE.MeshPhongMaterial({ color: z === 1 ? COLORS.green : COLORS.black, shininess: 30 }),
+            new THREE.MeshPhongMaterial({ color: z === -1 ? COLORS.blue : COLORS.black, shininess: 30 }),
+          ];
+          
           const cube = new THREE.Mesh(geometry, materials);
           cube.position.set(x, y, z);
+          // Store which faces have stickers for 2D mode
+          (cube as any).userData = {
+            stickers: [x === 1, x === -1, y === 1, y === -1, z === 1, z === -1]
+          };
           scene.add(cube);
           cubes.push(cube);
         }
@@ -161,13 +168,16 @@ export default function App() {
         };
       };
 
+      const lightDirection = new THREE.Vector3(1, 2, 3).normalize();
+
       const drawFallback = () => {
         if (!ctx || !cubesRef.current.length) return;
         ctx.fillStyle = '#111';
         ctx.fillRect(0, 0, width, height);
 
         const facesToDraw: any[] = [];
-        const s = 0.45; // half-size of sticker
+        const stickerS = 0.44; // half-size of sticker
+        const bodyS = 0.48;    // half-size of cubie face
 
         cubesRef.current.forEach(mesh => {
           mesh.updateMatrixWorld();
@@ -176,7 +186,7 @@ export default function App() {
           mesh.getWorldQuaternion(worldQuat);
           mesh.getWorldPosition(worldPosVec);
 
-          const faces = [
+          const baseFaces = [
             { n: new THREE.Vector3(1, 0, 0), colorIdx: 0 },
             { n: new THREE.Vector3(-1, 0, 0), colorIdx: 1 },
             { n: new THREE.Vector3(0, 1, 0), colorIdx: 2 },
@@ -185,60 +195,77 @@ export default function App() {
             { n: new THREE.Vector3(0, 0, -1), colorIdx: 5 }
           ];
 
-          faces.forEach(face => {
+          baseFaces.forEach(face => {
             const worldNormal = face.n.clone().applyQuaternion(worldQuat);
-            const facePos = worldPosVec.clone().add(worldNormal.clone().multiplyScalar(0.5));
+            const facePos = worldPosVec.clone().add(worldNormal.clone().multiplyScalar(0.48));
             
             const viewNormal = rotatePoint(worldNormal);
             const viewPos = rotatePoint(facePos);
 
             // Backface culling: viewNormal.z > 0 means it points towards camera at Z=10
             if (viewNormal.z > 0) {
-              let v1, v2, v3, v4;
-              if (face.n.x !== 0) {
-                v1 = new THREE.Vector3(0, -s, -s); v2 = new THREE.Vector3(0, s, -s);
-                v3 = new THREE.Vector3(0, s, s); v4 = new THREE.Vector3(0, -s, s);
-              } else if (face.n.y !== 0) {
-                v1 = new THREE.Vector3(-s, 0, -s); v2 = new THREE.Vector3(s, 0, -s);
-                v3 = new THREE.Vector3(s, 0, s); v4 = new THREE.Vector3(-s, 0, s);
-              } else {
-                v1 = new THREE.Vector3(-s, -s, 0); v2 = new THREE.Vector3(s, -s, 0);
-                v3 = new THREE.Vector3(s, s, 0); v4 = new THREE.Vector3(-s, s, 0);
-              }
+              const hasSticker = (mesh.userData as any).stickers[face.colorIdx];
+              
+              // Shading calculation
+              const dot = Math.max(0, viewNormal.dot(lightDirection));
+              const brightness = 0.4 + dot * 0.6; // Ambient + Diffuse
 
-              const points = [v1, v2, v3, v4].map(p => {
-                const worldV = p.clone().applyQuaternion(worldQuat).add(worldPosVec);
-                return project(rotatePoint(worldV));
-              });
+              // Helper to define face vertices
+              const getVertices = (s: number) => {
+                let v1, v2, v3, v4;
+                if (face.n.x !== 0) {
+                  v1 = new THREE.Vector3(0, -s, -s); v2 = new THREE.Vector3(0, s, -s);
+                  v3 = new THREE.Vector3(0, s, s); v4 = new THREE.Vector3(0, -s, s);
+                } else if (face.n.y !== 0) {
+                  v1 = new THREE.Vector3(-s, 0, -s); v2 = new THREE.Vector3(s, 0, -s);
+                  v3 = new THREE.Vector3(s, 0, s); v4 = new THREE.Vector3(-s, 0, s);
+                } else {
+                  v1 = new THREE.Vector3(-s, -s, 0); v2 = new THREE.Vector3(s, -s, 0);
+                  v3 = new THREE.Vector3(s, s, 0); v4 = new THREE.Vector3(-s, s, 0);
+                }
+                return [v1, v2, v3, v4].map(p => {
+                  const worldV = p.clone().applyQuaternion(worldQuat).add(worldPosVec);
+                  return project(rotatePoint(worldV));
+                });
+              };
 
-              const materials = mesh.material as any[];
-              const color = materials[face.colorIdx].color.getHex();
-
+              // Add Cubie Body (Black)
               facesToDraw.push({
-                z: viewPos.z,
-                color: `#${color.toString(16).padStart(6, '0')}`,
-                points
+                z: viewPos.z - 0.001, // Slightly behind sticker to prevent Z-fighting in sorting
+                color: '#000000',
+                points: getVertices(bodyS)
               });
+
+              // Add Sticker if it's an outer face
+              if (hasSticker) {
+                const materials = mesh.material as any[];
+                const baseColor = materials[face.colorIdx].color;
+                const r = Math.floor(baseColor.r * 255 * brightness);
+                const g = Math.floor(baseColor.g * 255 * brightness);
+                const b = Math.floor(baseColor.b * 255 * brightness);
+                
+                facesToDraw.push({
+                  z: viewPos.z,
+                  color: `rgb(${r},${g},${b})`,
+                  points: getVertices(stickerS)
+                });
+              }
             }
           });
         });
 
         // Painter's algorithm: sort by Z (back to front)
-        // Larger Z is closer to camera in this projection
         facesToDraw.sort((a, b) => a.z - b.z);
 
         facesToDraw.forEach(f => {
           ctx.beginPath();
           ctx.moveTo(f.points[0].x, f.points[0].y);
-          ctx.lineTo(f.points[1].x, f.points[1].y);
-          ctx.lineTo(f.points[2].x, f.points[2].y);
-          ctx.lineTo(f.points[3].x, f.points[3].y);
+          for (let i = 1; i < 4; i++) {
+            ctx.lineTo(f.points[i].x, f.points[i].y);
+          }
           ctx.closePath();
           ctx.fillStyle = f.color;
           ctx.fill();
-          ctx.strokeStyle = '#000';
-          ctx.lineWidth = 1;
-          ctx.stroke();
         });
       };
 
