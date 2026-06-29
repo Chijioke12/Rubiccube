@@ -1,5 +1,7 @@
 // @ts-nocheck
 declare const THREE: any;
+import Cube from 'cubejs';
+Cube.initSolver();
 
 export const COLORS = {
   white: 0xffffff,
@@ -86,11 +88,19 @@ export class RubiksEngine {
   }
 
   updateCamera(rotation: { x: number, y: number }) {
+    if (!this.camera) return;
     const radius = 8;
     const x = radius * Math.sin(rotation.x) * Math.cos(rotation.y);
     const y = radius * Math.sin(rotation.y);
     const z = radius * Math.cos(rotation.x) * Math.cos(rotation.y);
     this.camera.position.set(x, y, z);
+    
+    if (Math.cos(rotation.y) < 0) {
+      this.camera.up.set(0, -1, 0);
+    } else {
+      this.camera.up.set(0, 1, 0);
+    }
+    
     this.camera.lookAt(0, 0, 0);
   }
 
@@ -320,6 +330,117 @@ export class RubiksEngine {
     }
 
     return { axis: rotAxis, layer: Math.round(layer), angle: sign * Math.PI / 2 };
+  }
+
+  getCubeState(): string {
+    const colorToFace: Record<number, string> = {
+      [COLORS.white]: 'U',
+      [COLORS.red]: 'R',
+      [COLORS.green]: 'F',
+      [COLORS.yellow]: 'D',
+      [COLORS.orange]: 'L',
+      [COLORS.blue]: 'B'
+    };
+    
+    const raycaster = new THREE.Raycaster();
+    const getFacelet = (start: any, dir: any) => {
+      raycaster.set(start, dir);
+      const intersects = raycaster.intersectObjects(this.cubes);
+      if (intersects.length > 0) {
+        const mesh = intersects[0].object;
+        const matIndex = intersects[0].face.materialIndex;
+        const color = mesh.material[matIndex].color.getHex();
+        return colorToFace[color] || '?';
+      }
+      return '?';
+    };
+
+    let state = '';
+
+    // U face: z from -1 to 1, x from -1 to 1
+    for (let z = -1; z <= 1; z++) {
+      for (let x = -1; x <= 1; x++) {
+        state += getFacelet(new THREE.Vector3(x, 2, z), new THREE.Vector3(0, -1, 0));
+      }
+    }
+    // R face: y from 1 to -1, z from 1 to -1
+    for (let y = 1; y >= -1; y--) {
+      for (let z = 1; z >= -1; z--) {
+        state += getFacelet(new THREE.Vector3(2, y, z), new THREE.Vector3(-1, 0, 0));
+      }
+    }
+    // F face: y from 1 to -1, x from -1 to 1
+    for (let y = 1; y >= -1; y--) {
+      for (let x = -1; x <= 1; x++) {
+        state += getFacelet(new THREE.Vector3(x, y, 2), new THREE.Vector3(0, 0, -1));
+      }
+    }
+    // D face: z from 1 to -1, x from -1 to 1
+    for (let z = 1; z >= -1; z--) {
+      for (let x = -1; x <= 1; x++) {
+        state += getFacelet(new THREE.Vector3(x, -2, z), new THREE.Vector3(0, 1, 0));
+      }
+    }
+    // L face: y from 1 to -1, z from -1 to 1
+    for (let y = 1; y >= -1; y--) {
+      for (let z = -1; z <= 1; z++) {
+        state += getFacelet(new THREE.Vector3(-2, y, z), new THREE.Vector3(1, 0, 0));
+      }
+    }
+    // B face: y from 1 to -1, x from 1 to -1
+    for (let y = 1; y >= -1; y--) {
+      for (let x = 1; x >= -1; x--) {
+        state += getFacelet(new THREE.Vector3(x, y, -2), new THREE.Vector3(0, 0, 1));
+      }
+    }
+
+    return state;
+  }
+
+  isSolving = false;
+
+  async autoSolve() {
+    if (this.isSolving) return;
+    this.isSolving = true;
+
+    try {
+      const stateStr = this.getCubeState();
+      const cube = Cube.fromString(stateStr);
+      const movesStr = cube.solve();
+      
+      if (!movesStr) {
+        this.isSolving = false;
+        return;
+      }
+
+      const moves = movesStr.split(' ').filter((m: string) => m.length > 0);
+      
+      for (const move of moves) {
+        const face = move[0];
+        const mod = move[1];
+
+        let axis: 'x'|'y'|'z' = 'x';
+        let layer = 1;
+        let angle = Math.PI / 2;
+
+        if (face === 'R') { axis = 'x'; layer = 1; angle = -Math.PI / 2; }
+        if (face === 'L') { axis = 'x'; layer = -1; angle = Math.PI / 2; }
+        if (face === 'U') { axis = 'y'; layer = 1; angle = -Math.PI / 2; }
+        if (face === 'D') { axis = 'y'; layer = -1; angle = Math.PI / 2; }
+        if (face === 'F') { axis = 'z'; layer = 1; angle = -Math.PI / 2; }
+        if (face === 'B') { axis = 'z'; layer = -1; angle = Math.PI / 2; }
+
+        if (mod === "'") angle = -angle;
+        if (mod === "2") angle = angle * 2;
+
+        await new Promise<void>(resolve => {
+          this.rotateFace(axis, layer, angle, resolve);
+        });
+      }
+    } catch (e) {
+      console.error("Failed to solve:", e);
+    }
+    this.isSolving = false;
   }
 
   render() {

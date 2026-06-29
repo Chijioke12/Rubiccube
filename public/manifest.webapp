@@ -3,8 +3,8 @@
   "description": "3D Rubik's Cube game for KaiOS",
   "launch_path": "/index.html",
   "icons": {
-    "56": "icon.jpg",
-    "112": "icon.jpg"
+    "56": "icon.png",
+    "112": "icon.png"
   },
   "developer": {
     "name": "KaiCube Dev",

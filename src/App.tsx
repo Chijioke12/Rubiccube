@@ -116,12 +116,12 @@ export default function App() {
       return;
     }
     if (action === '*') {
-      rotationTarget.current = { x: 0.5, y: 0.5 };
+      engine.autoSolve();
       return;
     }
 
-    if (action === '2') rotationTarget.current.y = Math.min(Math.PI/2 - 0.1, rotationTarget.current.y + 0.5);
-    if (action === '8') rotationTarget.current.y = Math.max(-Math.PI/2 + 0.1, rotationTarget.current.y - 0.5);
+    if (action === '2') rotationTarget.current.y += 0.5;
+    if (action === '8') rotationTarget.current.y -= 0.5;
     if (action === '4') rotationTarget.current.x -= 0.5;
     if (action === '6') rotationTarget.current.x += 0.5;
 
@@ -142,7 +142,7 @@ export default function App() {
           const dx = action === 'right' ? 1 : action === 'left' ? -1 : 0;
           const dy = action === 'down' ? 1 : action === 'up' ? -1 : 0;
           rotationTarget.current.x += dx * 0.5;
-          rotationTarget.current.y = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, rotationTarget.current.y - dy * 0.5));
+          rotationTarget.current.y -= dy * 0.5;
         } else {
           // Swipe cube face instantly for D-Pad
           const dx = action === 'right' ? 100 : action === 'left' ? -100 : 0;
@@ -251,7 +251,7 @@ export default function App() {
       }}>
         <span style={{ color: grabState?.active ? '#4ade80' : '#f87171' }}>{grabState?.active ? "Grabbing" : "Free"} (Enter)</span>
         <span>{webglStatus}</span>
-        <span>* Reset</span>
+        <span>* Auto Solve</span>
       </div>
       <div style={{
         position: 'absolute', bottom: '5px', left: '50%', transform: 'translateX(-50%)', color: 'white',
@@ -285,6 +285,7 @@ export default function App() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
             {['1', '2', '3', '4', 'enter', '6', '7', '8', '9', '*', '0', '#'].map(key => {
               let label = key === 'enter' ? 'Grab/Rel' : key;
+              if (key === '*') label = 'Solve';
               if (key === '2') label = 'Cam ↑';
               if (key === '8') label = 'Cam ↓';
               if (key === '4') label = 'Cam ←';
