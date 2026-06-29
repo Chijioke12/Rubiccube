@@ -8,10 +8,11 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { RubiksEngine } from './rubiksEngine';
 
 export default function App() {
-  const [isCW, setIsCW] = useState(true);
   const [webglStatus, setWebglStatus] = useState("Initializing...");
-  const [frameCount, setFrameCount] = useState(0);
+  const [facingMessage, setFacingMessage] = useState("Front (Green)");
   const [isRotating, setIsRotating] = useState(false);
+  const [cursorPos, setCursorPos] = useState({ x: 120, y: 160 });
+  const [grabState, setGrabState] = useState<{ active: boolean, hit: any } | null>(null);
 
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<RubiksEngine | null>(null);
@@ -40,7 +41,25 @@ export default function App() {
     let animationId: number;
     const animate = () => {
       animationId = requestAnimationFrame(animate);
-      setFrameCount(prev => prev + 1);
+
+      // Calculate facing face
+      const cx = Math.sin(currentRotation.current.x) * Math.cos(currentRotation.current.y);
+      const cy = Math.sin(currentRotation.current.y);
+      const cz = Math.cos(currentRotation.current.x) * Math.cos(currentRotation.current.y);
+
+      const absX = Math.abs(cx);
+      const absY = Math.abs(cy);
+      const absZ = Math.abs(cz);
+
+      let facing = "";
+      if (absX > absY && absX > absZ) {
+        facing = cx > 0 ? "Right (Red)" : "Left (Orange)";
+      } else if (absY > absX && absY > absZ) {
+        facing = cy > 0 ? "Top (White)" : "Bottom (Yellow)";
+      } else {
+        facing = cz > 0 ? "Front (Green)" : "Back (Blue)";
+      }
+      setFacingMessage(prev => prev !== facing ? facing : prev);
 
       // Smooth rotation
       currentRotation.current.x += (rotationTarget.current.x - currentRotation.current.x) * 0.1;
@@ -64,7 +83,7 @@ export default function App() {
   const checkWebGL = () => {
     try {
       const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      const gl = (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext;
       if (!gl) {
         alert("WebGL is NOT supported on this device.");
         return;
@@ -90,30 +109,81 @@ export default function App() {
 
   const handleAction = (action: string) => {
     const engine = engineRef.current;
-    if (!engine) return;
+    if (!engine || isRotating) return;
 
-    switch (action) {
-      case 'softleft':
-        checkWebGL();
-        break;
-      case 'left': rotationTarget.current.x -= 0.5; break;
-      case 'right': rotationTarget.current.x += 0.5; break;
-      case 'up': rotationTarget.current.y = Math.min(rotationTarget.current.y + 0.5, Math.PI / 2 - 0.1); break;
-      case 'down': rotationTarget.current.y = Math.max(rotationTarget.current.y - 0.5, -Math.PI / 2 + 0.1); break;
-      
-      case '2': engine.rotateFace('y', 1, isCW ? -Math.PI / 2 : Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
-      case '8': engine.rotateFace('y', -1, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
-      case '4': engine.rotateFace('x', -1, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
-      case '6': engine.rotateFace('x', 1, isCW ? -Math.PI / 2 : Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
-      case '5': engine.rotateFace('z', 1, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
-      case '0': engine.rotateFace('z', -1, isCW ? -Math.PI / 2 : Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
-      
-      case '1': engine.rotateFace('x', 0, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
-      case '3': engine.rotateFace('y', 0, isCW ? -Math.PI / 2 : Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
-      case '7': engine.rotateFace('z', 0, isCW ? Math.PI / 2 : -Math.PI / 2, () => setIsRotating(false)); setIsRotating(true); break;
+    if (action === 'softleft') {
+      checkWebGL();
+      return;
+    }
+    if (action === '*') {
+      rotationTarget.current = { x: 0.5, y: 0.5 };
+      return;
+    }
 
-      case '*': rotationTarget.current = { x: 0.5, y: 0.5 }; break;
-      case '#': setIsCW(!isCW); break;
+    if (action === '2') rotationTarget.current.y = Math.min(Math.PI/2 - 0.1, rotationTarget.current.y + 0.5);
+    if (action === '8') rotationTarget.current.y = Math.max(-Math.PI/2 + 0.1, rotationTarget.current.y - 0.5);
+    if (action === '4') rotationTarget.current.x -= 0.5;
+    if (action === '6') rotationTarget.current.x += 0.5;
+
+    if (action === 'enter') {
+      if (grabState?.active) {
+        setGrabState(null);
+      } else {
+        const hit = engine.raycast(cursorPos.x, cursorPos.y);
+        setGrabState({ active: true, hit });
+      }
+      return;
+    }
+
+    if (['left', 'right', 'up', 'down'].includes(action)) {
+      if (grabState?.active) {
+        const dx = action === 'right' ? 1 : action === 'left' ? -1 : 0;
+        const dy = action === 'down' ? 1 : action === 'up' ? -1 : 0;
+
+        if (!grabState.hit) {
+          // Swipe background = rotate camera
+          rotationTarget.current.x += dx * 0.5;
+          rotationTarget.current.y = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, rotationTarget.current.y - dy * 0.5));
+        } else {
+          // Swipe cube face
+          const hit = grabState.hit;
+          const pi2 = Math.PI / 2;
+          let axis: 'x'|'y'|'z' = 'x';
+          let layer = 0;
+          let angle = 0;
+
+          const nz = Math.round(hit.normal.z);
+          const ny = Math.round(hit.normal.y);
+          const nx = Math.round(hit.normal.x);
+
+          if (nz !== 0) {
+             if (dx !== 0) { axis = 'y'; layer = hit.cubePos.y; angle = dx * pi2 * nz; }
+             else if (dy !== 0) { axis = 'x'; layer = hit.cubePos.x; angle = dy * pi2 * nz; }
+          } else if (nx !== 0) {
+             if (dx !== 0) { axis = 'y'; layer = hit.cubePos.y; angle = dx * pi2 * nx; }
+             else if (dy !== 0) { axis = 'z'; layer = hit.cubePos.z; angle = dy * -pi2 * nx; }
+          } else if (ny !== 0) {
+             if (dx !== 0) { axis = 'z'; layer = hit.cubePos.z; angle = dx * -pi2 * ny; }
+             else if (dy !== 0) { axis = 'x'; layer = hit.cubePos.x; angle = dy * pi2 * ny; }
+          }
+
+          if (angle !== 0) {
+             engine.rotateFace(axis, Math.round(layer), angle, () => setIsRotating(false));
+             setIsRotating(true);
+             setGrabState(null);
+          }
+        }
+      } else {
+        // Move hand cursor
+        setCursorPos(prev => {
+          let { x, y } = prev;
+          if (action === 'left') x -= 15;
+          if (action === 'right') x += 15;
+          if (action === 'up') y -= 15;
+          if (action === 'down') y += 15;
+          return { x: Math.max(0, Math.min(240, x)), y: Math.max(0, Math.min(320, y)) };
+        });
+      }
     }
   };
 
@@ -126,6 +196,9 @@ export default function App() {
       } else if (key === 'SoftRight' || key === 'F2') {
         e.preventDefault();
         handleAction('softright');
+      } else if (key === 'Enter') {
+        e.preventDefault();
+        handleAction('enter');
       } else if (key.startsWith('Arrow')) {
         handleAction(key.toLowerCase().replace('arrow', ''));
       } else if (key === '*') {
@@ -138,7 +211,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isRotating, isCW]);
+  }, [isRotating, grabState, cursorPos]);
 
   const ControlButton = ({ label, action, style = {} }: { label: string, action: string, style?: any }) => (
     <button
@@ -161,14 +234,48 @@ export default function App() {
   const content = (
     <div style={{ width: '240px', height: '320px', position: 'relative', backgroundColor: '#000', overflow: 'hidden' }}>
       <div ref={mountRef} style={{ width: '240px', height: '320px', display: 'block', backgroundColor: '#000' }} />
+      
+      {/* Hand Cursor */}
+      <div style={{
+        position: 'absolute',
+        top: cursorPos.y,
+        left: cursorPos.x,
+        transform: 'translate(-50%, -50%)',
+        fontSize: '24px',
+        pointerEvents: 'none',
+        zIndex: 10,
+        textShadow: '0 0 4px rgba(0,0,0,0.5)',
+        transition: 'top 0.1s linear, left 0.1s linear'
+      }}>
+        {grabState?.active ? (
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5">
+            <circle cx="12" cy="12" r="6" fill="rgba(74, 222, 128, 0.4)" />
+            <path d="M12 2 L12 6 M12 18 L12 22 M2 12 L6 12 M18 12 L22 12" />
+          </svg>
+        ) : (
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <circle cx="12" cy="12" r="8" />
+            <circle cx="12" cy="12" r="2" fill="white" />
+          </svg>
+        )}
+      </div>
+
       <div style={{
         position: 'absolute', top: '5px', left: '5px', right: '5px', color: 'white',
         backgroundColor: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px',
         fontSize: '9px', display: 'flex', justifyContent: 'space-between', pointerEvents: 'none'
       }}>
-        <span style={{ color: isCW ? '#4ade80' : '#f87171' }}>{isCW ? "CW" : "CCW"} (#)</span>
-        <span>{webglStatus} | {frameCount}</span>
+        <span style={{ color: grabState?.active ? '#4ade80' : '#f87171' }}>{grabState?.active ? "Grabbing" : "Free"} (Enter)</span>
+        <span>{webglStatus}</span>
         <span>* Reset</span>
+      </div>
+      <div style={{
+        position: 'absolute', bottom: '5px', left: '50%', transform: 'translateX(-50%)', color: 'white',
+        backgroundColor: 'rgba(0,0,0,0.6)', padding: '4px 8px', borderRadius: '4px',
+        fontSize: '9px', pointerEvents: 'none', whiteSpace: 'nowrap', display: 'flex', flexDirection: 'column', alignItems: 'center'
+      }}>
+        <span>Facing: {facingMessage}</span>
+        <span style={{ color: '#9ca3af' }}>D-Pad: {grabState?.active ? "Swipe/Rotate" : "Move Hand"}</span>
       </div>
     </div>
   );
@@ -192,14 +299,21 @@ export default function App() {
             <div /> <ControlButton label="▼" action="down" style={{ borderRadius: '0 0 10px 10px' }} /> <div />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, '*', 0, '#'].map(key => (
-              <ControlButton 
-                key={key} 
-                label={key === '#' ? (isCW ? "CW" : "CCW") : key.toString()} 
-                action={key.toString()} 
-                style={{ height: '32px', fontSize: key === '#' ? '9px' : '14px', backgroundColor: key === '#' ? (isCW ? 'rgba(0,255,0,0.1)' : 'rgba(255,0,0,0.1)') : 'rgba(255,255,255,0.05)' }}
-              />
-            ))}
+            {['1', '2', '3', '4', 'enter', '6', '7', '8', '9', '*', '0', '#'].map(key => {
+              let label = key === 'enter' ? 'Grab/Rel' : key;
+              if (key === '2') label = 'Cam ↑';
+              if (key === '8') label = 'Cam ↓';
+              if (key === '4') label = 'Cam ←';
+              if (key === '6') label = 'Cam →';
+              return (
+                <ControlButton 
+                  key={key} 
+                  label={label} 
+                  action={key} 
+                  style={{ height: '32px', fontSize: '10px', backgroundColor: 'rgba(255,255,255,0.05)' }}
+                />
+              );
+            })}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 10px', backgroundColor: '#333', borderRadius: '5px', fontSize: '10px', color: '#aaa' }}>
             <span>WebGL Info</span>
