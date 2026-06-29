@@ -268,11 +268,58 @@ export class RubiksEngine {
       const pos = new THREE.Vector3();
       mesh.getWorldPosition(pos);
       return {
-         cubePos: pos,
-         normal: intersect.face.normal.clone().transformDirection(mesh.matrixWorld).round()
+         cubePos: pos.round(),
+         normal: intersect.face.normal.clone().transformDirection(mesh.matrixWorld).round(),
+         point: intersect.point.clone()
       };
     }
     return null;
+  }
+
+  getDragRotation(hit: any, startX: number, startY: number, endX: number, endY: number) {
+    if (this.fallbackMode || !this.camera) return null;
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(hit.normal, hit.point);
+    
+    const getIntersect = (x: number, y: number) => {
+      const mouse = new THREE.Vector2();
+      mouse.x = (x / this.width) * 2 - 1;
+      mouse.y = -(y / this.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, this.camera);
+      const target = new THREE.Vector3();
+      const result = raycaster.ray.intersectPlane(plane, target);
+      return result ? target : null;
+    };
+
+    const startPoint = getIntersect(startX, startY);
+    const endPoint = getIntersect(endX, endY);
+    
+    if (!startPoint || !endPoint) return null;
+
+    const delta = endPoint.clone().sub(startPoint);
+    if (delta.length() < 0.3) return null; // Increased threshold slightly for cursor
+    
+    const rotVector = new THREE.Vector3().crossVectors(hit.normal, delta);
+    
+    const ax = Math.abs(rotVector.x);
+    const ay = Math.abs(rotVector.y);
+    const az = Math.abs(rotVector.z);
+    
+    let rotAxis: 'x' | 'y' | 'z' = 'x';
+    let sign = Math.sign(rotVector.x);
+    let layer = hit.cubePos.x;
+    
+    if (ay > ax && ay > az) {
+        rotAxis = 'y';
+        sign = Math.sign(rotVector.y);
+        layer = hit.cubePos.y;
+    } else if (az > ax && az > ay) {
+        rotAxis = 'z';
+        sign = Math.sign(rotVector.z);
+        layer = hit.cubePos.z;
+    }
+
+    return { axis: rotAxis, layer: Math.round(layer), angle: sign * Math.PI / 2 };
   }
 
   render() {

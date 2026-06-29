@@ -12,7 +12,7 @@ export default function App() {
   const [facingMessage, setFacingMessage] = useState("Front (Green)");
   const [isRotating, setIsRotating] = useState(false);
   const [cursorPos, setCursorPos] = useState({ x: 120, y: 160 });
-  const [grabState, setGrabState] = useState<{ active: boolean, hit: any } | null>(null);
+  const [grabState, setGrabState] = useState<{ active: boolean, hit: any, startX?: number, startY?: number } | null>(null);
 
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<RubiksEngine | null>(null);
@@ -130,57 +130,41 @@ export default function App() {
         setGrabState(null);
       } else {
         const hit = engine.raycast(cursorPos.x, cursorPos.y);
-        setGrabState({ active: true, hit });
+        setGrabState({ active: true, hit, startX: cursorPos.x, startY: cursorPos.y });
       }
       return;
     }
 
     if (['left', 'right', 'up', 'down'].includes(action)) {
       if (grabState?.active) {
-        const dx = action === 'right' ? 1 : action === 'left' ? -1 : 0;
-        const dy = action === 'down' ? 1 : action === 'up' ? -1 : 0;
-
         if (!grabState.hit) {
           // Swipe background = rotate camera
+          const dx = action === 'right' ? 1 : action === 'left' ? -1 : 0;
+          const dy = action === 'down' ? 1 : action === 'up' ? -1 : 0;
           rotationTarget.current.x += dx * 0.5;
           rotationTarget.current.y = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, rotationTarget.current.y - dy * 0.5));
         } else {
-          // Swipe cube face
-          const hit = grabState.hit;
-          const pi2 = Math.PI / 2;
-          let axis: 'x'|'y'|'z' = 'x';
-          let layer = 0;
-          let angle = 0;
+          // Swipe cube face instantly for D-Pad
+          const dx = action === 'right' ? 100 : action === 'left' ? -100 : 0;
+          const dy = action === 'down' ? 100 : action === 'up' ? -100 : 0;
+          
+          const simulatedEndX = grabState.startX! + dx;
+          const simulatedEndY = grabState.startY! + dy;
 
-          const nz = Math.round(hit.normal.z);
-          const ny = Math.round(hit.normal.y);
-          const nx = Math.round(hit.normal.x);
-
-          if (nz !== 0) {
-             if (dx !== 0) { axis = 'y'; layer = hit.cubePos.y; angle = dx * pi2 * nz; }
-             else if (dy !== 0) { axis = 'x'; layer = hit.cubePos.x; angle = dy * pi2 * nz; }
-          } else if (nx !== 0) {
-             if (dx !== 0) { axis = 'y'; layer = hit.cubePos.y; angle = dx * pi2 * nx; }
-             else if (dy !== 0) { axis = 'z'; layer = hit.cubePos.z; angle = dy * -pi2 * nx; }
-          } else if (ny !== 0) {
-             if (dx !== 0) { axis = 'z'; layer = hit.cubePos.z; angle = dx * -pi2 * ny; }
-             else if (dy !== 0) { axis = 'x'; layer = hit.cubePos.x; angle = dy * pi2 * ny; }
-          }
-
-          if (angle !== 0) {
-             engine.rotateFace(axis, Math.round(layer), angle, () => setIsRotating(false));
-             setIsRotating(true);
-             setGrabState(null);
+          const rot = engine.getDragRotation(grabState.hit, grabState.startX!, grabState.startY!, simulatedEndX, simulatedEndY);
+          if (rot) {
+            engine.rotateFace(rot.axis, rot.layer, rot.angle, () => setIsRotating(false));
+            setIsRotating(true);
+            setGrabState(null);
           }
         }
       } else {
-        // Move hand cursor
         setCursorPos(prev => {
           let { x, y } = prev;
-          if (action === 'left') x -= 15;
-          if (action === 'right') x += 15;
-          if (action === 'up') y -= 15;
-          if (action === 'down') y += 15;
+          if (action === 'left') x -= 20;
+          if (action === 'right') x += 20;
+          if (action === 'up') y -= 20;
+          if (action === 'down') y += 20;
           return { x: Math.max(0, Math.min(240, x)), y: Math.max(0, Math.min(320, y)) };
         });
       }
