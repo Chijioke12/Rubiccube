@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build && node scripts/build-omnisd.cjs",
+    "build": "npx tsx scripts/generate-cubie.ts && vite build && node scripts/build-omnisd.cjs",
     "build:omnisd": "npm run build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
