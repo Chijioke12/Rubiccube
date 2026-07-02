@@ -36,6 +36,9 @@ export class RubiksEngine {
     // Initial setup
     this.createCubes();
     this.setupLighting();
+
+    // Asynchronously load the GLB model and swap the procedural meshes
+    this.loadGLBModel();
   }
 
   private createCubes() {
@@ -58,7 +61,8 @@ export class RubiksEngine {
           const cube = new THREE.Mesh(geometry, materials);
           cube.position.set(x, y, z);
           (cube as any).userData = {
-            stickers: [x === 1, x === -1, y === 1, y === -1, z === 1, z === -1]
+            stickers: [x === 1, x === -1, y === 1, y === -1, z === 1, z === -1],
+            originalPos: new THREE.Vector3(x, y, z)
           };
           this.scene.add(cube);
           this.cubes.push(cube);
@@ -192,17 +196,34 @@ export class RubiksEngine {
           });
 
           if (hasSticker) {
-            const materials = mesh.material as any[];
-            const baseColor = materials[face.colorIdx].color;
-            const r = Math.floor(baseColor.r * 255 * brightness);
-            const g = Math.floor(baseColor.g * 255 * brightness);
-            const b = Math.floor(baseColor.b * 255 * brightness);
-            
-            facesToDraw.push({
-              z: viewPos.z,
-              color: `rgb(${r},${g},${b})`,
-              points: getVertices(stickerS)
-            });
+            let baseColor = null;
+            if (mesh.material) {
+              if (Array.isArray(mesh.material)) {
+                baseColor = mesh.material[face.colorIdx].color;
+              } else {
+                baseColor = mesh.material.color;
+              }
+            } else {
+              // It's a GLB group clone, find the sticker sub-mesh
+              const STICKER_NAMES = ['Sticker_R', 'Sticker_L', 'Sticker_U', 'Sticker_D', 'Sticker_F', 'Sticker_B'];
+              const stickerName = STICKER_NAMES[face.colorIdx];
+              const stickerSubMesh = mesh.getObjectByName(stickerName);
+              if (stickerSubMesh && stickerSubMesh.material) {
+                baseColor = stickerSubMesh.material.color;
+              }
+            }
+
+            if (baseColor) {
+              const r = Math.floor(baseColor.r * 255 * brightness);
+              const g = Math.floor(baseColor.g * 255 * brightness);
+              const b = Math.floor(baseColor.b * 255 * brightness);
+              
+              facesToDraw.push({
+                z: viewPos.z,
+                color: `rgb(${r},${g},${b})`,
+                points: getVertices(stickerS)
+              });
+            }
           }
         }
       });
@@ -271,15 +292,23 @@ export class RubiksEngine {
     mouse.y = -(y / this.height) * 2 + 1;
     raycaster.setFromCamera(mouse, this.camera);
     
-    const intersects = raycaster.intersectObjects(this.cubes);
+    const intersects = raycaster.intersectObjects(this.cubes, true);
     if (intersects.length > 0) {
       const intersect = intersects[0];
-      const mesh = intersect.object;
+      const subMesh = intersect.object;
+      
+      // Find which cubie Group/Mesh in this.cubes contains this subMesh
+      let cube = subMesh;
+      while (cube && !this.cubes.includes(cube as any)) {
+        cube = cube.parent;
+      }
+      if (!cube) cube = subMesh;
+      
       const pos = new THREE.Vector3();
-      mesh.getWorldPosition(pos);
+      cube.getWorldPosition(pos);
       return {
          cubePos: pos.round(),
-         normal: intersect.face.normal.clone().transformDirection(mesh.matrixWorld).round(),
+         normal: intersect.face.normal.clone().transformDirection(subMesh.matrixWorld).round(),
          point: intersect.point.clone()
       };
     }
@@ -345,11 +374,16 @@ export class RubiksEngine {
     const raycaster = new THREE.Raycaster();
     const getFacelet = (start: any, dir: any) => {
       raycaster.set(start, dir);
-      const intersects = raycaster.intersectObjects(this.cubes);
+      const intersects = raycaster.intersectObjects(this.cubes, true);
       if (intersects.length > 0) {
         const mesh = intersects[0].object;
-        const matIndex = intersects[0].face.materialIndex;
-        const color = mesh.material[matIndex].color.getHex();
+        let color: number;
+        if (Array.isArray(mesh.material)) {
+          const matIndex = intersects[0].face.materialIndex;
+          color = mesh.material[matIndex].color.getHex();
+        } else {
+          color = mesh.material.color.getHex();
+        }
         return colorToFace[color] || '?';
       }
       return '?';
@@ -441,6 +475,88 @@ export class RubiksEngine {
       console.error("Failed to solve:", e);
     }
     this.isSolving = false;
+  }
+
+  private loadGLBModel() {
+    if (typeof (THREE as any).GLTFLoader === 'undefined') {
+      console.warn('GLTFLoader not available globally yet.');
+      return;
+    }
+    const loader = new (THREE as any).GLTFLoader();
+    loader.load('/cubie.glb', (gltf: any) => {
+      console.log('Successfully loaded cubie.glb model');
+      const template = gltf.scene.getObjectByName('Cubie') || gltf.scene;
+      
+      this.cubes.forEach((oldCube, index) => {
+        const clone = template.clone();
+        
+        // Position and rotation should match the old cube exactly!
+        clone.position.copy(oldCube.position);
+        clone.quaternion.copy(oldCube.quaternion);
+        
+        // Copy the original position from userData or position
+        const originalPos = (oldCube as any).userData.originalPos || oldCube.position.clone();
+        const x = Math.round(originalPos.x);
+        const y = Math.round(originalPos.y);
+        const z = Math.round(originalPos.z);
+        
+        // Match the stickers to original cube colors
+        const stickersMap: Record<string, number> = {
+          'Sticker_R': x === 1 ? COLORS.red : COLORS.black,
+          'Sticker_L': x === -1 ? COLORS.orange : COLORS.black,
+          'Sticker_U': y === 1 ? COLORS.white : COLORS.black,
+          'Sticker_D': y === -1 ? COLORS.yellow : COLORS.black,
+          'Sticker_F': z === 1 ? COLORS.green : COLORS.black,
+          'Sticker_B': z === -1 ? COLORS.blue : COLORS.black,
+        };
+        
+        clone.traverse((child: any) => {
+          if (child.isMesh) {
+            if (child.name.startsWith('Sticker_')) {
+              const color = stickersMap[child.name];
+              if (color !== undefined) {
+                child.material = child.material.clone();
+                child.material.color.setHex(color);
+                
+                // Hide inactive stickers, style active stickers beautifully
+                if (color === COLORS.black) {
+                  child.visible = false;
+                } else {
+                  child.material.roughness = 0.1;
+                  child.material.metalness = 0.1;
+                }
+              }
+            } else if (child.name === 'Body') {
+              child.material = child.material.clone();
+              child.material.color.setHex(0x1a1a1a); // Sleek dark gray
+              child.material.roughness = 0.3;
+              child.material.metalness = 0.2;
+            }
+          }
+        });
+        
+        clone.userData = { 
+          ...oldCube.userData,
+          originalPos: originalPos
+        };
+        
+        // Replace in the scene graph
+        if (oldCube.parent) {
+          oldCube.parent.add(clone);
+          oldCube.parent.remove(oldCube);
+        } else {
+          this.scene.add(clone);
+          this.scene.remove(oldCube);
+        }
+        
+        // Replace in this.cubes array
+        this.cubes[index] = clone;
+      });
+      
+      console.log('Successfully swapped procedural cubes with generated GLB model!');
+    }, undefined, (error: any) => {
+      console.error('Failed to load cubie.glb:', error);
+    });
   }
 
   render() {
